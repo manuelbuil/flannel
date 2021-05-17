@@ -23,12 +23,16 @@ import (
 )
 
 type Config struct {
-	Network     ip.IP4Net
-	SubnetMin   ip.IP4
-	SubnetMax   ip.IP4
-	SubnetLen   uint
-	BackendType string          `json:"-"`
-	Backend     json.RawMessage `json:",omitempty"`
+	EnableIPv4    bool
+	EnableIPv6    bool
+	IPv6Network   ip.IP6Net
+	IPv6SubnetLen uint
+	Network       ip.IP4Net
+	SubnetMin     ip.IP4
+	SubnetMax     ip.IP4
+	SubnetLen     uint
+	BackendType   string          `json:"-"`
+	Backend       json.RawMessage `json:",omitempty"`
 }
 
 func parseBackendType(be json.RawMessage) (string, error) {
@@ -47,6 +51,7 @@ func parseBackendType(be json.RawMessage) (string, error) {
 
 func ParseConfig(s string) (*Config, error) {
 	cfg := new(Config)
+	cfg.EnableIPv4 = true
 	err := json.Unmarshal([]byte(s), cfg)
 	if err != nil {
 		return nil, err

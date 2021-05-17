@@ -18,6 +18,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"math/big"
 	"net"
 	"net/http"
 	"os"
@@ -296,27 +297,46 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Set up ipMasq if needed
-	if opts.ipMasq {
-		if err = recycleIPTables(config.Network, bn.Lease()); err != nil {
-			log.Errorf("Failed to recycle IPTables rules, %v", err)
-			cancel()
-			wg.Wait()
-			os.Exit(1)
-		}
-		log.Infof("Setting up masking rules")
-		go network.SetupAndEnsureIPTables(network.MasqRules(config.Network, bn.Lease()), opts.iptablesResyncSeconds)
-	}
+        // Set up ipMasq if needed
+        if opts.ipMasq {
+                if config.EnableIPv4 {
+                        if err = recycleIPTables(config.Network, bn.Lease()); err != nil {
+                                log.Errorf("Failed to recycle IPTables rules, %v", err)
+                                cancel()
+                                wg.Wait()
+                                os.Exit(1)
+                        }
+                        log.Infof("Setting up masking rules")
+                        go network.SetupAndEnsureIPTables(network.MasqRules(config.Network, bn.Lease()), opts.iptablesResyncSeconds)
 
-	// Always enables forwarding rules. This is needed for Docker versions >1.13 (https://docs.docker.com/engine/userguide/networking/default_network/container-communication/#container-communication-between-hosts)
-	// In Docker 1.12 and earlier, the default FORWARD chain policy was ACCEPT.
-	// In Docker 1.13 and later, Docker sets the default policy of the FORWARD chain to DROP.
-	if opts.iptablesForwardRules {
-		log.Infof("Changing default FORWARD chain policy to ACCEPT")
-		go network.SetupAndEnsureIPTables(network.ForwardRules(config.Network.String()), opts.iptablesResyncSeconds)
-	}
+                }
+                if config.EnableIPv6 {
+                        if err = recycleIP6Tables(config.IPv6Network, bn.Lease()); err != nil {
+                                log.Errorf("Failed to recycle IP6Tables rules, %v", err)
+                                cancel()
+                                wg.Wait()
+                                os.Exit(1)
+                        }
+                        log.Infof("Setting up masking ip6 rules")
+                        go network.SetupAndEnsureIP6Tables(network.MasqIP6Rules(config.IPv6Network, bn.Lease()), opts.iptablesResyncSeconds)
+                }
+        }
 
-	if err := WriteSubnetFile(opts.subnetFile, config.Network, opts.ipMasq, bn); err != nil {
+        // Always enables forwarding rules. This is needed for Docker versions >1.13 (https://docs.docker.com/engine/userguide/networking/default_network/container-communication/#container-communication-between-hosts)
+        // In Docker 1.12 and earlier, the default FORWARD chain policy was ACCEPT.
+        // In Docker 1.13 and later, Docker sets the default policy of the FORWARD chain to DROP.
+        if opts.iptablesForwardRules {
+                if config.EnableIPv4 {
+                        log.Infof("Changing default FORWARD chain policy to ACCEPT")
+                        go network.SetupAndEnsureIPTables(network.ForwardRules(config.Network.String()), opts.iptablesResyncSeconds)
+                }
+                if config.EnableIPv6 {
+                        log.Infof("IPv6: Changing default FORWARD chain policy to ACCEPT")
+                        go network.SetupAndEnsureIP6Tables(network.ForwardRules(config.IPv6Network.String()), opts.iptablesResyncSeconds)
+                }
+        }
+
+	if err := WriteSubnetFile(opts.subnetFile, config, opts.ipMasq, bn); err != nil {
 		// Continue, even though it failed.
 		log.Warningf("Failed to write subnet file: %s", err)
 	} else {
@@ -363,6 +383,22 @@ func recycleIPTables(nw ip.IP4Net, lease *subnet.Lease) error {
 		}
 	}
 	return nil
+}
+
+func recycleIP6Tables(nw ip.IP6Net, lease *subnet.Lease) error {
+        prevNetwork := ReadIP6CIDRFromSubnetFile(opts.subnetFile, "FLANNEL_IPV6_NETWORK")
+        prevSubnet := ReadIP6CIDRFromSubnetFile(opts.subnetFile, "FLANNEL_IPV6_SUBNET")
+        // recycle iptables rules only when network configured or subnet leased is not equal to current one.
+        if prevNetwork.String() != nw.String() && prevSubnet.String() != lease.IPv6Subnet.String() {
+                log.Infof("Current ipv6 network or subnet (%v, %v) is not equal to previous one (%v, %v), trying to recycle old ip6tables rules", nw, lease.IPv6Subnet, prevNetwork, prevSubnet)
+                lease := &subnet.Lease{
+                        IPv6Subnet: prevSubnet,
+                }
+                if err := network.DeleteIP6Tables(network.MasqIP6Rules(prevNetwork, lease)); err != nil {
+                        return err
+                }
+        }
+        return nil
 }
 
 func shutdownHandler(ctx context.Context, sigs chan os.Signal, cancel context.CancelFunc) {
@@ -558,7 +594,7 @@ func LookupExtIface(ifname string, ifregex string) (*backend.ExternalInterface, 
 	}, nil
 }
 
-func WriteSubnetFile(path string, nw ip.IP4Net, ipMasq bool, bn backend.Network) error {
+func WriteSubnetFile(path string, config *subnet.Config, ipMasq bool, bn backend.Network) error {
 	dir, name := filepath.Split(path)
 	os.MkdirAll(dir, 0755)
 
@@ -568,13 +604,23 @@ func WriteSubnetFile(path string, nw ip.IP4Net, ipMasq bool, bn backend.Network)
 		return err
 	}
 
-	// Write out the first usable IP by incrementing
-	// sn.IP by one
-	sn := bn.Lease().Subnet
-	sn.IP += 1
+	if config.EnableIPv4 {
+		nw := config.Network
+		// Write out the first usable IP by incrementing
+		// sn.IP by one
+		sn := bn.Lease().Subnet
+		sn.IP += 1
+		fmt.Fprintf(f, "FLANNEL_NETWORK=%s\n", nw)
+		fmt.Fprintf(f, "FLANNEL_SUBNET=%s\n", sn)
+	}
+	if config.EnableIPv6 {
+		ip6Nw := config.IPv6Network
+		ip6Sn := bn.Lease().IPv6Subnet
+		ip6Sn.IP = (*ip.IP6)(big.NewInt(0).Add((*big.Int)(ip6Sn.IP), big.NewInt(1)))
+		fmt.Fprintf(f, "FLANNEL_IPV6_NETWORK=%s\n", ip6Nw)
+		fmt.Fprintf(f, "FLANNEL_IPV6_SUBNET=%s\n", ip6Sn)
+	}
 
-	fmt.Fprintf(f, "FLANNEL_NETWORK=%s\n", nw)
-	fmt.Fprintf(f, "FLANNEL_SUBNET=%s\n", sn)
 	fmt.Fprintf(f, "FLANNEL_MTU=%d\n", bn.MTU())
 	_, err = fmt.Fprintf(f, "FLANNEL_IPMASQ=%v\n", ipMasq)
 	f.Close()
@@ -618,3 +664,20 @@ func ReadCIDRFromSubnetFile(path string, CIDRKey string) ip.IP4Net {
 	}
 	return prevCIDR
 }
+
+func ReadIP6CIDRFromSubnetFile(path string, CIDRKey string) ip.IP6Net {
+        var prevCIDR ip.IP6Net
+        if _, err := os.Stat(path); !os.IsNotExist(err) {
+                prevSubnetVals, err := godotenv.Read(path)
+                if err != nil {
+                        log.Errorf("Couldn't fetch previous %s from subnet file at %s: %s", CIDRKey, path, err)
+                } else if prevCIDRString, ok := prevSubnetVals[CIDRKey]; ok {
+                        err = prevCIDR.UnmarshalJSON([]byte(prevCIDRString))
+                        if err != nil {
+                                log.Errorf("Couldn't parse previous %s from subnet file at %s: %s", CIDRKey, path, err)
+                        }
+                }
+        }
+        return prevCIDR
+}
+

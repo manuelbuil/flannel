@@ -51,6 +51,8 @@ const (
 )
 
 type kubeSubnetManager struct {
+	enableIPv4     bool
+	enableIPv6     bool
 	annotations    annotations
 	client         clientset.Interface
 	nodeName       string
@@ -132,6 +134,8 @@ func newKubeSubnetManager(ctx context.Context, c clientset.Interface, sc *subnet
 	if err != nil {
 		return nil, err
 	}
+	ksm.enableIPv4 = sc.EnableIPv4
+	ksm.enableIPv6 = sc.EnableIPv6
 	ksm.client = c
 	ksm.nodeName = nodeName
 	ksm.subnetConf = sc
@@ -230,10 +234,25 @@ func (ksm *kubeSubnetManager) AcquireLease(ctx context.Context, attrs *subnet.Le
 	if err != nil {
 		return nil, err
 	}
-	_, cidr, err := net.ParseCIDR(n.Spec.PodCIDR)
+
+	var cidr, ipv6Cidr *net.IPNet
+	_, cidr, err = net.ParseCIDR(n.Spec.PodCIDR)
 	if err != nil {
 		return nil, err
 	}
+	log.Info("MANU - This is the cidr: ", cidr)
+
+	for _, podCidr := range n.Spec.PodCIDRs {
+		_, parseCidr, err := net.ParseCIDR(podCidr)
+		if err != nil {
+			return nil, err
+		}
+		if len(parseCidr.IP) == net.IPv6len {
+			ipv6Cidr = parseCidr
+			break
+		}
+	}
+
 	if n.Annotations[ksm.annotations.BackendData] != string(bd) ||
 		n.Annotations[ksm.annotations.BackendType] != attrs.BackendType ||
 		n.Annotations[ksm.annotations.BackendPublicIP] != attrs.PublicIP.String() ||
@@ -277,11 +296,21 @@ func (ksm *kubeSubnetManager) AcquireLease(ctx context.Context, attrs *subnet.Le
 	if err != nil {
 		log.Errorf("Unable to set NetworkUnavailable to False for %q: %v", ksm.nodeName, err)
 	}
-	return &subnet.Lease{
-		Subnet:     ip.FromIPNet(cidr),
+
+	lease := &subnet.Lease{
 		Attrs:      *attrs,
 		Expiration: time.Now().Add(24 * time.Hour),
-	}, nil
+	}
+	if cidr != nil {
+		lease.Subnet = ip.FromIPNet(cidr)
+	}
+	if ipv6Cidr != nil {
+		lease.IPv6Subnet = ip.FromIP6Net(ipv6Cidr)
+	}
+
+	log.Info("MANU - This is the lease: ", lease)
+
+	return lease, nil
 }
 
 func (ksm *kubeSubnetManager) WatchLeases(ctx context.Context, cursor interface{}) (subnet.LeaseWatchResult, error) {
@@ -309,12 +338,32 @@ func (ksm *kubeSubnetManager) nodeToLease(n v1.Node) (l subnet.Lease, err error)
 	l.Attrs.BackendType = n.Annotations[ksm.annotations.BackendType]
 	l.Attrs.BackendData = json.RawMessage(n.Annotations[ksm.annotations.BackendData])
 
-	_, cidr, err := net.ParseCIDR(n.Spec.PodCIDR)
-	if err != nil {
-		return l, err
+	if ksm.enableIPv4 {
+		_, cidr, err := net.ParseCIDR(n.Spec.PodCIDR)
+		if err != nil {
+			return l, err
+		}
+
+		l.Subnet = ip.FromIPNet(cidr)
+		l.EnableIPv4 = ksm.enableIPv4
 	}
 
-	l.Subnet = ip.FromIPNet(cidr)
+	if ksm.enableIPv6 {
+		ipv6Cidr := new(net.IPNet)
+		for _, podCidr := range n.Spec.PodCIDRs {
+			_, parseCidr, err := net.ParseCIDR(podCidr)
+			if err != nil {
+				return l, err
+			}
+			if len(parseCidr.IP) == net.IPv6len {
+				ipv6Cidr = parseCidr
+				break
+			}
+		}
+		l.IPv6Subnet = ip.FromIP6Net(ipv6Cidr)
+		l.EnableIPv6 = ksm.enableIPv6
+	}
+
 	return l, nil
 }
 
