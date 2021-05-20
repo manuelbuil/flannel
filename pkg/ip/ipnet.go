@@ -19,6 +19,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	log "k8s.io/klog"
 )
 
 type IP4 uint32
@@ -157,6 +158,7 @@ func (n IP4Net) Equal(other IP4Net) bool {
 }
 
 func (n IP4Net) Mask() uint32 {
+	log.Info("MANU - Inside ipv4 mask")
 	var ones uint32 = 0xFFFFFFFF
 	return ones << (32 - n.PrefixLen)
 }

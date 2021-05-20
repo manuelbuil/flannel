@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"math/big"
 	"net"
+	log "k8s.io/klog"
 )
 
 type IP6 big.Int
@@ -59,6 +60,7 @@ func IsEmpty(subnet *IP6) bool {
 }
 
 func GetIPv6SubnetMin(networkIP *IP6, subnetSize *big.Int) *IP6 {
+	log.Info("MANU - Inside GetIPv6SubnetMin with networkIP: ", networkIP)
 	return (*IP6)(big.NewInt(0).Add((*big.Int)(networkIP), subnetSize))
 }
 
@@ -174,6 +176,7 @@ func (n IP6Net) Equal(other IP6Net) bool {
 }
 
 func (n IP6Net) Mask() *big.Int {
+	log.Info("MANU - Inside ipv6 mask")
 	mask := net.CIDRMask(int(n.PrefixLen), 128)
 	return big.NewInt(0).SetBytes(mask)
 }

@@ -65,6 +65,7 @@ type kubeSubnetManager struct {
 func NewSubnetManager(ctx context.Context, apiUrl, kubeconfig, prefix, netConfPath string) (subnet.Manager, error) {
 	var cfg *rest.Config
 	var err error
+	log.Info("[MANU] Inside NewSubnetManager")
 	// Try to build kubernetes config from a master url or a kubeconfig filepath. If neither masterUrl
 	// or kubeconfigPath are passed in we fall back to inClusterConfig. If inClusterConfig fails,
 	// we fallback to the default config.
@@ -73,6 +74,7 @@ func NewSubnetManager(ctx context.Context, apiUrl, kubeconfig, prefix, netConfPa
 		return nil, fmt.Errorf("fail to create kubernetes config: %v", err)
 	}
 
+	log.Infof("MANU - This is clientcmdconfig: %+v", cfg)
 	c, err := clientset.NewForConfig(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("unable to initialize client: %v", err)
@@ -85,6 +87,7 @@ func NewSubnetManager(ctx context.Context, apiUrl, kubeconfig, prefix, netConfPa
 	if nodeName == "" {
 		podName := os.Getenv("POD_NAME")
 		podNamespace := os.Getenv("POD_NAMESPACE")
+		log.Infof("MANU - This is POD_NAME: ", podName, " and POD_NS: ", podNamespace)
 		if podName == "" || podNamespace == "" {
 			return nil, fmt.Errorf("env variables POD_NAME and POD_NAMESPACE must be set")
 		}
@@ -99,20 +102,25 @@ func NewSubnetManager(ctx context.Context, apiUrl, kubeconfig, prefix, netConfPa
 		}
 	}
 
+	log.Info("[MANU] Before reading the file")
+
 	netConf, err := ioutil.ReadFile(netConfPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read net conf: %v", err)
 	}
 
-	sc, err := subnet.ParseConfig(string(netConf))
+	log.Info("[MANU] Before parsing the file: ", string(netConf))
+	sc, err := subnet.ParseConfig(string(netConf), false)
 	if err != nil {
 		return nil, fmt.Errorf("error parsing subnet config: %s", err)
 	}
 
+	log.Info("[MANU] Before creating newKubeSubnetManager. This is the sc: %+v", sc)
 	sm, err := newKubeSubnetManager(ctx, c, sc, nodeName, prefix)
 	if err != nil {
 		return nil, fmt.Errorf("error creating network manager: %s", err)
 	}
+	log.Info("[MANU] Before triggering the goroutine")
 	go sm.Run(context.Background())
 
 	log.Infof("Waiting %s for node controller to sync", nodeControllerSyncTimeout)

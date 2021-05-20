@@ -21,6 +21,7 @@ import (
 	"math/big"
 
 	"github.com/coreos/flannel/pkg/ip"
+	log "k8s.io/klog"
 )
 
 type Config struct {
@@ -52,7 +53,8 @@ func parseBackendType(be json.RawMessage) (string, error) {
 	return bt.Type, nil
 }
 
-func ParseConfig(s string) (*Config, error) {
+func ParseConfig(s string, subnet_needed bool) (*Config, error) {
+	log.Info("MANU - Entering ParseConfig")
 	cfg := new(Config)
 	// Enable ipv4 by default
 	cfg.EnableIPv4 = true
@@ -64,7 +66,8 @@ func ParseConfig(s string) (*Config, error) {
 		return nil, fmt.Errorf("EnableIPv4 or EnableIPv6 option must be enabled one at least")
 	}
 
-	if cfg.EnableIPv4 {
+	log.Infof("MANU - This is the config to parse %+v", cfg)
+	if cfg.EnableIPv4 && subnet_needed {
 		if cfg.SubnetLen > 0 {
 			// SubnetLen needs to allow for a tunnel and bridge device on each host.
 			if cfg.SubnetLen > 30 {
@@ -94,8 +97,10 @@ func ParseConfig(s string) (*Config, error) {
 			}
 		}
 
+		log.Info("MANU - This is the ipv4 SubnetLen: ", cfg.SubnetLen," and ipv4 SubnetMin: ",cfg.SubnetMin)
 		subnetSize := ip.IP4(1 << (32 - cfg.SubnetLen))
 
+		log.Info("MANU - This is the ipv4 SubnetSize: ", subnetSize," and this is ip.IP4(0): ",ip.IP4(0))
 		if cfg.SubnetMin == ip.IP4(0) {
 			// skip over the first subnet otherwise it causes problems. e.g.
 			// if Network is 10.100.0.0/16, having an interface with 10.0.0.0
@@ -105,14 +110,18 @@ func ParseConfig(s string) (*Config, error) {
 			return nil, errors.New("SubnetMin is not in the range of the Network")
 		}
 
+		log.Info("MANU - This is the new ipv4 SubnetMin: ",cfg.SubnetMin)
 		if cfg.SubnetMax == ip.IP4(0) {
 			cfg.SubnetMax = cfg.Network.Next().IP - subnetSize
 		} else if !cfg.Network.Contains(cfg.SubnetMax) {
 			return nil, errors.New("SubnetMax is not in the range of the Network")
 		}
 
+		log.Info("MANU - This is the new ipv4 SubnetMax: ",cfg.SubnetMax)
+
 		// The SubnetMin and SubnetMax need to be aligned to a SubnetLen boundary
 		mask := ip.IP4(0xFFFFFFFF << (32 - cfg.SubnetLen))
+		log.Info("MANU - This is the new ipv4 Mask: ", mask)
 		if cfg.SubnetMin != cfg.SubnetMin&mask {
 			return nil, fmt.Errorf("SubnetMin is not on a SubnetLen boundary: %v", cfg.SubnetMin)
 		}
@@ -121,7 +130,8 @@ func ParseConfig(s string) (*Config, error) {
 			return nil, fmt.Errorf("SubnetMax is not on a SubnetLen boundary: %v", cfg.SubnetMax)
 		}
 	}
-	if cfg.EnableIPv6 {
+	if cfg.EnableIPv6 && subnet_needed {
+		log.Info("MANU - Inside the cfg.EnableIPv6")
 		if cfg.IPv6SubnetLen > 0 {
 			// SubnetLen needs to allow for a tunnel and bridge device on each host.
 			if cfg.IPv6SubnetLen > 126 {
@@ -151,25 +161,34 @@ func ParseConfig(s string) (*Config, error) {
 			}
 		}
 
+		log.Info("MANU - Right before calculating the ipv6SubnetSize")
 		ipv6SubnetSize := big.NewInt(0).Lsh(big.NewInt(1), 128-cfg.IPv6SubnetLen)
 
+		log.Info("MANU - Right after calculating the ipv6SubnetSize: ", ipv6SubnetSize)
 		if ip.IsEmpty(cfg.IPv6SubnetMin) {
 			// skip over the first subnet otherwise it causes problems. e.g.
 			// if Network is fc00::/48, having an interface with fc00::
 			// conflicts with the broadcast address.
+		        log.Info("MANU - Before calculating GetIPv6SubnetMin")
 			cfg.IPv6SubnetMin = ip.GetIPv6SubnetMin(cfg.IPv6Network.IP, ipv6SubnetSize)
+			log.Info("MANU - After calculating GetIPv6SubnetMin: ", cfg.IPv6SubnetMin)
 		} else if !cfg.IPv6Network.Contains(cfg.IPv6SubnetMin) {
 			return nil, errors.New("IPv6SubnetMin is not in the range of the IPv6Network")
 		}
 
 		if ip.IsEmpty(cfg.IPv6SubnetMax) {
+		        log.Info("MANU - Before calculating IPv6SubnetMax")
 			cfg.IPv6SubnetMax = ip.GetIPv6SubnetMax(cfg.IPv6Network.Next().IP, ipv6SubnetSize)
+			log.Info("MANU - After calculating IPv6SubnetMax: ", cfg.IPv6SubnetMax)
 		} else if !cfg.IPv6Network.Contains(cfg.IPv6SubnetMax) {
 			return nil, errors.New("IPv6SubnetMax is not in the range of the IPv6Network")
 		}
 
+		log.Info("MANU - Before calculating the mask with value: ", cfg.IPv6SubnetLen)
+
 		// The SubnetMin and SubnetMax need to be aligned to a SubnetLen boundary
 		mask := ip.Mask(int(cfg.IPv6SubnetLen))
+		log.Info("MANU - After calculating the mask: ", mask)
 		if !ip.CheckIPv6Subnet(cfg.IPv6SubnetMin, mask) {
 			return nil, fmt.Errorf("IPv6SubnetMin is not on a SubnetLen boundary: %v", cfg.IPv6SubnetMin)
 		}
@@ -179,6 +198,7 @@ func ParseConfig(s string) (*Config, error) {
 		}
 	}
 
+	log.Info("MANU - Before parsing the backendtype")
 	bt, err := parseBackendType(cfg.Backend)
 	if err != nil {
 		return nil, err

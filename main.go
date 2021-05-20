@@ -185,6 +185,7 @@ func getIPFamily(autoDetectIPv4, autoDetectIPv6 bool) (int, error) {
 }
 
 func newSubnetManager(ctx context.Context) (subnet.Manager, error) {
+	log.Info("MANU - Inside newSubnetManager")
 	if opts.kubeSubnetMgr {
 		return kube.NewSubnetManager(ctx, opts.kubeApiUrl, opts.kubeConfigFile, opts.kubeAnnotationPrefix, opts.netConfPath)
 	}
@@ -199,6 +200,8 @@ func newSubnetManager(ctx context.Context) (subnet.Manager, error) {
 		Password:  opts.etcdPassword,
 	}
 
+	log.Info("MANU this is the etcd cfg: ", cfg)
+
 	// Attempt to renew the lease for the subnet specified in the subnetFile
 	prevSubnet := ReadCIDRFromSubnetFile(opts.subnetFile, "FLANNEL_SUBNET")
 
@@ -210,8 +213,12 @@ func main() {
 		fmt.Fprintln(os.Stderr, version.Version)
 		os.Exit(0)
 	}
+	log.Info("MANU's version 1.5")
 
 	flagutil.SetFlagsFromEnv(flannelFlags, "FLANNELD")
+
+	// Print the configs
+	log.Infof("%+v", opts)
 
 	// Validate flags
 	if opts.subnetLeaseRenewMargin >= 24*60 || opts.subnetLeaseRenewMargin <= 0 {
@@ -449,6 +456,7 @@ func getConfig(ctx context.Context, sm subnet.Manager) (*subnet.Config, error) {
 	// Retry every second until it succeeds
 	for {
 		config, err := sm.GetNetworkConfig(ctx)
+		log.Infof("MANU, this is the config: %+v", config)
 		if err != nil {
 			log.Errorf("Couldn't fetch network config: %s", err)
 		} else if config == nil {
@@ -517,6 +525,7 @@ func LookupExtIface(ifname string, ifregex string, ipStack int) (*backend.Extern
 	var ifaceV6Addr net.IP
 	var err error
 
+	log.Info("MANU - LookupExtIface. ipStack: ", ipStack, " and ifname: ", ifname)
 	// Check ip family stack
 	if ipStack == noneStack {
 		return nil, fmt.Errorf("none matched ip stack")
