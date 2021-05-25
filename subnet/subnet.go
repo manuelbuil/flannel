@@ -40,7 +40,10 @@ type LeaseAttrs struct {
 }
 
 type Lease struct {
+	EnableIPv4 bool
+	EnableIPv6 bool
 	Subnet     ip.IP4Net
+	IPv6Subnet ip.IP6Net
 	Attrs      LeaseAttrs
 	Expiration time.Time
 
