@@ -79,6 +79,8 @@ func (n *network) handleSubnetEvents(batch []subnet.Event) {
 				continue
 			}
 
+			log.Infof("MANU - This is the len(n.subnetAddCommand): %v", len(n.subnetAddCommand))
+			log.Infof("MANU - This is the n.subnetAddCommand: %v", n.subnetAddCommand)
 			if len(n.subnetAddCommand) > 0 {
 				backendData := ""
 
@@ -88,13 +90,13 @@ func (n *network) handleSubnetEvents(batch []subnet.Event) {
 						continue
 					}
 				}
-
 				cmd_output, err := runCmd([]string{
 					fmt.Sprintf("SUBNET=%s", evt.Lease.Subnet),
 					fmt.Sprintf("PUBLIC_IP=%s", evt.Lease.Attrs.PublicIP)},
 					backendData,
 					"sh", "-c", n.subnetAddCommand)
 
+			        log.Infof("MANU - This is the cmd_output: %v", cmd_output)
 				if err != nil {
 					log.Errorf("failed to run command: %s Err: %v Output: %s", n.subnetAddCommand, err, cmd_output)
 				} else {
