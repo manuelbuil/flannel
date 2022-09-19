@@ -21,6 +21,7 @@ import (
 	"net"
 	"os"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/flannel-io/flannel/pkg/ip"
@@ -195,6 +196,20 @@ func newKubeSubnetManager(ctx context.Context, c clientset.Interface, sc *subnet
 	return &ksm, nil
 }
 
+func (ksm *kubeSubnetManager) CompleteNetworkConfig(ctx context.Context, lease subnet.Lease, wg *sync.WaitGroup, subnetLeaseRenewMargin int) error {
+	if ksm.setNodeNetworkUnavailable {
+		log.Infoln("Setting NodeNetworkUnavailable")
+		err := ksm.setNodeNetworkUnavailableFalse(ctx)
+		if err != nil {
+			log.Errorf("Unable to set NodeNetworkUnavailable to False for %q: %v", ksm.nodeName, err)
+			return err
+		}
+	} else {
+		log.Infoln("Skip setting NodeNetworkUnavailable")
+	}
+	return nil
+}
+
 func (ksm *kubeSubnetManager) handleAddLeaseEvent(et subnet.EventType, obj interface{}) {
 	n := obj.(*v1.Node)
 	if s, ok := n.Annotations[ksm.annotations.SubnetKubeManaged]; !ok || s != "true" {
@@ -346,15 +361,6 @@ func (ksm *kubeSubnetManager) AcquireLease(ctx context.Context, attrs *subnet.Le
 			return nil, err
 		}
 	}
-	if ksm.setNodeNetworkUnavailable {
-		log.Infoln("Setting NodeNetworkUnavailable")
-		err = ksm.setNodeNetworkUnavailableFalse(ctx)
-		if err != nil {
-			log.Errorf("Unable to set NodeNetworkUnavailable to False for %q: %v", ksm.nodeName, err)
-		}
-	} else {
-		log.Infoln("Skip setting NodeNetworkUnavailable")
-	}
 
 	lease := &subnet.Lease{
 		Attrs:      *attrs,
@@ -447,10 +453,6 @@ func (ksm *kubeSubnetManager) nodeToLease(n v1.Node) (l subnet.Lease, err error)
 // RenewLease: unimplemented
 func (ksm *kubeSubnetManager) RenewLease(ctx context.Context, lease *subnet.Lease) error {
 	return ErrUnimplemented
-}
-
-func (ksm *kubeSubnetManager) WatchLease(ctx context.Context, sn ip.IP4Net, sn6 ip.IP6Net, cursor interface{}) (subnet.LeaseWatchResult, error) {
-	return subnet.LeaseWatchResult{}, ErrUnimplemented
 }
 
 func (ksm *kubeSubnetManager) Name() string {

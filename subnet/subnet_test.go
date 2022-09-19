@@ -15,8 +15,9 @@
 package subnet
 
 import (
-	"github.com/flannel-io/flannel/pkg/ip"
 	"testing"
+
+	"github.com/flannel-io/flannel/pkg/ip"
 )
 
 func TestSubnetNodev4(t *testing.T) {

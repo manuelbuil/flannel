@@ -18,6 +18,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/flannel-io/flannel/pkg/ip"
@@ -76,6 +77,50 @@ func (m *LocalManager) GetNetworkConfig(ctx context.Context) (*Config, error) {
 	}
 
 	return ParseConfig(cfg)
+}
+
+func (m *LocalManager) CompleteNetworkConfig(ctx context.Context, lease Lease, wg *sync.WaitGroup, subnetLeaseRenewMargin int) error {
+	// Use the subnet manager to start watching leases.
+	evts := make(chan Event)
+
+	wg.Add(1)
+	go func() {
+		m.watchLease(ctx, lease.Subnet, lease.IPv6Subnet, evts)
+		wg.Done()
+	}()
+
+	renewMargin := time.Duration(subnetLeaseRenewMargin) * time.Minute
+	dur := time.Until(lease.Expiration) - renewMargin
+
+	for {
+		select {
+		case <-time.After(dur):
+			err := m.RenewLease(ctx, &lease)
+			if err != nil {
+				log.Error("Error renewing lease (trying again in 1 min): ", err)
+				dur = time.Minute
+				continue
+			}
+
+			log.Info("Lease renewed, new expiration: ", lease.Expiration)
+			dur = time.Until(lease.Expiration) - renewMargin
+
+		case e, ok := <-evts:
+			if !ok {
+				log.Infof("Stopped monitoring lease")
+				return errors.New("canceled")
+			}
+			switch e.Type {
+			case EventAdded:
+				dur = time.Until(lease.Expiration) - renewMargin
+				log.Infof("Waiting for %s to renew lease", dur)
+
+			case EventRemoved:
+				log.Error("Lease has been revoked. Shutting down daemon.")
+				return errors.New("interrupted")
+			}
+		}
+	}
 }
 
 func (m *LocalManager) AcquireLease(ctx context.Context, attrs *LeaseAttrs) (*Lease, error) {
@@ -287,7 +332,38 @@ func (m *LocalManager) leaseWatchReset(ctx context.Context, sn ip.IP4Net, sn6 ip
 	}, nil
 }
 
-func (m *LocalManager) WatchLease(ctx context.Context, sn ip.IP4Net, sn6 ip.IP6Net, cursor interface{}) (LeaseWatchResult, error) {
+func (m *LocalManager) watchLease(ctx context.Context, sn ip.IP4Net, sn6 ip.IP6Net, receiver chan Event) {
+	var cursor interface{}
+
+	for {
+		wr, err := m.watchSubnetLease(ctx, sn, sn6, cursor)
+		if err != nil {
+			if err == context.Canceled || err == context.DeadlineExceeded {
+				log.Infof("%v, close receiver chan", err)
+				close(receiver)
+				return
+			}
+
+			log.Errorf("Subnet watch failed: %v", err)
+			time.Sleep(time.Second)
+			continue
+		}
+
+		if len(wr.Snapshot) > 0 {
+			receiver <- Event{
+				Type:  EventAdded,
+				Lease: wr.Snapshot[0],
+			}
+		} else {
+			receiver <- wr.Events[0]
+		}
+
+		cursor = wr.Cursor
+	}
+}
+
+func (m *LocalManager) watchSubnetLease(ctx context.Context, sn ip.IP4Net, sn6 ip.IP6Net, cursor interface{}) (LeaseWatchResult, error) {
+	// First time we check
 	if cursor == nil {
 		return m.leaseWatchReset(ctx, sn, sn6)
 	}

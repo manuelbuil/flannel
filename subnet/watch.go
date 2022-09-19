@@ -17,7 +17,6 @@ package subnet
 import (
 	"time"
 
-	"github.com/flannel-io/flannel/pkg/ip"
 	"golang.org/x/net/context"
 	log "k8s.io/klog"
 )
@@ -228,38 +227,4 @@ func (lw *leaseWatcher) remove(lease *Lease) Event {
 func deleteLease(l []Lease, i int) []Lease {
 	l = append(l[:i], l[i+1:]...)
 	return l
-}
-
-// WatchLease performs a long term watch of the given network's subnet lease
-// and communicates addition/deletion events on receiver channel. It takes care
-// of handling "fall-behind" logic where the history window has advanced too far
-// and it needs to diff the latest snapshot with its saved state and generate events
-func WatchLease(ctx context.Context, sm Manager, sn ip.IP4Net, sn6 ip.IP6Net, receiver chan Event) {
-	var cursor interface{}
-
-	for {
-		wr, err := sm.WatchLease(ctx, sn, sn6, cursor)
-		if err != nil {
-			if err == context.Canceled || err == context.DeadlineExceeded {
-				log.Infof("%v, close receiver chan", err)
-				close(receiver)
-				return
-			}
-
-			log.Errorf("Subnet watch failed: %v", err)
-			time.Sleep(time.Second)
-			continue
-		}
-
-		if len(wr.Snapshot) > 0 {
-			receiver <- Event{
-				Type:  EventAdded,
-				Lease: wr.Snapshot[0],
-			}
-		} else {
-			receiver <- wr.Events[0]
-		}
-
-		cursor = wr.Cursor
-	}
 }
