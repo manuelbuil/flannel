@@ -33,6 +33,9 @@ require (
 
 require (
 	github.com/avast/retry-go/v4 v4.5.1
+	github.com/k3s-io/k3s v1.27.13+k3s1
+	github.com/onsi/ginkgo/v2 v2.16.0
+	github.com/onsi/gomega v1.31.1
 	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common v1.0.905
 	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/vpc v1.0.894
 	sigs.k8s.io/knftables v0.0.14
@@ -50,9 +53,11 @@ require (
 	github.com/go-openapi/jsonpointer v0.19.6 // indirect
 	github.com/go-openapi/jsonreference v0.20.1 // indirect
 	github.com/go-openapi/swag v0.22.3 // indirect
+	github.com/go-task/slim-sprig v0.0.0-20230315185526-52ccab3ef572 // indirect
 	github.com/golang-jwt/jwt/v4 v4.4.2 // indirect
 	github.com/google/btree v1.0.1 // indirect
 	github.com/google/gnostic v0.5.7-v3refs // indirect
+	github.com/google/pprof v0.0.0-20230323073829-e72429f035bd // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/gorilla/websocket v1.4.2 // indirect
 	github.com/grpc-ecosystem/go-grpc-middleware v1.3.0 // indirect
